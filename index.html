@@ -271,18 +271,18 @@
     </div>
     <div class="card devcard" style="margin-bottom:10px">
       <div class="numrow">
-        <span class="vname" style="flex:1">上电播放流浪地球背景音</span>
+        <span class="vname" style="flex:1">开机音乐</span>
         <label class="switch">
           <input type="checkbox" id="bootBgm" disabled>
           <span class="slider"></span>
         </label>
       </div>
-      <p>设置保存在 ESP32 中，断电不会丢失。修改后不会立即播放，从下一次上电开始生效。</p>
+      <p>开机时自动播放音乐。设置保存在设备中，断电不会丢失；修改后从下一次开机开始生效。</p>
       <span class="devstate" id="bootBgmState">等待连接</span>
     </div>
     <div class="card devcard">
-      <div class="vname">WT588 烧录模式</div>
-      <p>仅在使用外部下载器烧录语音时开启。开启后 DIR 拉低，WT588 的 CLK/DATA 对应 IO 设为输入高阻，音频播放命令会被忽略。</p>
+      <div class="vname">语音芯片烧录模式</div>
+      <p>仅在用外部下载器烧录语音时开启。开启后通信引脚切换为高阻隔离，播放命令会被忽略。</p>
       <div class="numrow">
         <span class="devstate" id="dlState" style="flex:1">未开启</span>
         <button class="btn danger holdbtn" id="btnDlMode">长按 2 秒进入烧录模式</button>
@@ -390,13 +390,13 @@ function fillRange(range, v) {
 async function connect() {
   if (!navigator.bluetooth) {
     toast('当前浏览器不支持 Web Bluetooth');
-    log('err', '此浏览器不支持 Web Bluetooth，请用 Chrome / Edge');
+    log('err', '此浏览器不支持蓝牙连接，请用 Chrome / Edge');
     return;
   }
   try {
     el.connect.disabled = true;
     el.connect.textContent = '连接中…';
-    log('sys', '正在请求蓝牙设备…');
+    log('sys', '正在搜索附近的设备…');
     device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'CAR-DEBUGER' }],
       optionalServices: [SVC]
@@ -404,8 +404,8 @@ async function connect() {
     device.addEventListener('gattserverdisconnected', onDisconnected);
     await openGattWithRetry();
   } catch (e) {
-    log('err', '连接失败：' + (e.message || e));
-    toast('连接失败：' + (e.message || e));
+    log('err', '连接失败，请重试');
+    toast('连接失败，请重试');
     el.connect.disabled = false;
     el.connect.textContent = '连接蓝牙';
   }
@@ -422,7 +422,7 @@ async function openGattWithRetry() {
     } catch (e) {
       lastErr = e;
       if (attempt === 3) break;
-      log('err', 'GATT 连接失败（第 ' + attempt + ' 次）：' + (e.message || e));
+      log('err', '连接不稳定，正在重试（第 ' + attempt + ' 次）');
       try { if (device.gatt.connected) device.gatt.disconnect(); } catch (e2) {}
       await new Promise(r => setTimeout(r, 600));
       log('sys', '正在重试连接…');
@@ -432,7 +432,7 @@ async function openGattWithRetry() {
 }
 
 async function openGatt() {
-  log('sys', '正在连接 GATT…');
+  log('sys', '正在建立连接…');
   svc = null; dataCh = null; ctrlCh = null;
   server = await device.gatt.connect();
   svc = await server.getPrimaryService(SVC);
@@ -444,7 +444,7 @@ async function openGatt() {
 
   schemaRetries = 0;
   setConnected(true);
-  log('sys', '已连接：' + (device.name || 'CAR-DEBUGER'));
+  log('sys', '已连接设备');
   toast('蓝牙已连接');
   setTimeout(async () => {
     /* 订阅已触发整表下发，这里只查询开发者配置，避免重复整表挤占队列 */
@@ -493,10 +493,9 @@ async function send(obj) {
     } else {
       await ctrlCh.writeValue(data);
     }
-    log('tx', '→ ' + JSON.stringify(obj));
     return true;
   } catch (e) {
-    log('err', '写入失败：' + (e.message || e));
+    log('err', '指令发送失败，请检查连接');
     return false;
   }
 }
@@ -527,7 +526,7 @@ function onNotify(ev) {
       line = line.trim();
       if (!line) return;
       try { handleMsg(JSON.parse(line)); }
-      catch (e) { log('err', '解析失败：' + line.slice(0, 120)); }
+      catch (e) { log('err', '收到无法识别的数据，已忽略'); }
     });
   }
 }
@@ -537,7 +536,7 @@ function handleMsg(m) {
   switch (m.t) {
     case 'hello':
       el.fwline.textContent = '固件 ' + m.fw + ' · 协议 v' + m.proto;
-      log('rx', '← ' + JSON.stringify(m));
+      log('sys', '正在接收变量列表…');
       /* 每次整表下发都以 hello 开头，先清空旧卡片 */
       vars.clear();
       controls.clear();
@@ -549,7 +548,6 @@ function handleMsg(m) {
       break;
 
     case 'var':
-      log('rx', '← 变量 ' + m.id + '：' + m.name + ' (' + m.type + ')');
       vars.set(m.id, m);
       renderVar(m);
       el.varsEmpty.style.display = 'none';
@@ -559,23 +557,28 @@ function handleMsg(m) {
     case 'end':
       if (vars.size !== m.n && schemaRetries < 2) {
         schemaRetries++;
-        log('err', '变量表不完整：应有 ' + m.n + ' 个，实收 ' + vars.size + ' 个，正在重试');
+        log('err', '变量列表接收不完整，正在重新读取（第 ' + schemaRetries + ' 次）');
         setTimeout(() => { if (connected) send({ t: 'get' }); }, 300);
         break;
       }
       if (vars.size !== m.n) {
-        log('err', '变量表仍不完整：应有 ' + m.n + ' 个，实收 ' + vars.size + ' 个，请手动重新读取');
+        log('err', '变量列表仍不完整，请点“重新读取主控变量”');
         el.varHint.textContent = '变量表不完整，请重新读取';
         break;
       }
       schemaRetries = 0;
-      log('sys', '变量表接收完成，共 ' + m.n + ' 个');
+      log('sys', '变量列表已更新，共 ' + m.n + ' 个');
       el.varHint.textContent = m.n + ' 个变量';
       if (m.n === 0) el.varsEmpty.style.display = 'block';
       break;
 
     case 'val':
-      log('rx', '← 变量 ' + m.id + ' = ' + m.v + ' (' + (m.src === 'm' ? '主控' : '手机') + ')');
+      (() => {
+        const meta = vars.get(m.id);
+        const name = meta ? meta.name : '变量';
+        const value = meta ? fmtVal(meta, m.v) : m.v;
+        log('rx', name + ' 更新为 ' + value + (m.src === 'm' ? '（主控）' : '（已下发）'));
+      })();
       applyValue(m.id, m.v, m.src);
       break;
 
@@ -591,10 +594,10 @@ function handleMsg(m) {
       updateBootBgmUi();
       if (!m.q) {
         if (m.ok) {
-          log('sys', '上电背景音设置已保存：' + (bootBgm ? '播放' : '不播放'));
-          toast('已保存，下次上电生效');
+          log('sys', '开机音乐已更新：下次开机' + (bootBgm ? '播放' : '不播放'));
+          toast('已保存，下次开机生效');
         } else {
-          log('err', '上电背景音设置保存失败');
+          log('err', '开机音乐设置未保存');
           toast('保存失败，请重试');
         }
       }
@@ -603,7 +606,7 @@ function handleMsg(m) {
     case 'dlmode':
       dlMode = !!m.on;
       updateDlUi();
-      log('sys', dlMode ? 'WT588 已进入烧录高阻模式' : 'WT588 已恢复正常驱动');
+      log('sys', dlMode ? '烧录模式已开启，通信引脚处于高阻' : '烧录模式已关闭，播放已恢复');
       break;
 
     case 'log':
@@ -615,7 +618,7 @@ function handleMsg(m) {
       break;
 
     default:
-      log('rx', '← ' + JSON.stringify(m));
+      log('sys', '收到一条未识别的消息，已忽略');
   }
 }
 
@@ -824,7 +827,7 @@ function updateBootBgmUi() {
   cb.checked = bootBgm;
   cb.disabled = !connected || bootBgmSaving;
   $('bootBgmState').textContent = !connected ? '等待连接'
-    : (bootBgmSaving ? '正在保存…' : (bootBgm ? '下次上电播放' : '下次上电不播放'));
+    : (bootBgmSaving ? '正在保存…' : (bootBgm ? '下次开机播放' : '下次开机不播放'));
 }
 
 $('bootBgm').addEventListener('change', async () => {
@@ -840,13 +843,13 @@ $('bootBgm').addEventListener('change', async () => {
   }
 });
 
-/* ---------------- 开发者模式 / WT588 烧录 ---------------- */
+/* ---------------- 开发者模式 / 烧录 ---------------- */
 function updateDlUi() {
   const btn = $('btnDlMode');
   const state = $('dlState');
   btn.disabled = !connected;
   btn.textContent = dlMode ? '长按 2 秒退出烧录模式' : '长按 2 秒进入烧录模式';
-  state.textContent = dlMode ? '已开启 · CLK/DATA 高阻' : '未开启';
+  state.textContent = dlMode ? '已开启 · 通信引脚高阻' : '未开启';
   state.classList.toggle('on', dlMode);
 }
 
@@ -860,10 +863,6 @@ el.fwline.addEventListener('click', () => {
     devTapCount = 0;
     $('devSection').hidden = false;
     updateDlUi();
-    toast('开发者模式已开启');
-    log('sys', '开发者模式已解锁');
-  } else if (devTapCount >= 3) {
-    toast('再点击 ' + (7 - devTapCount) + ' 次开启开发者模式', 1000);
   }
 });
 
@@ -912,16 +911,16 @@ $('btnDlMode').addEventListener('contextmenu', ev => ev.preventDefault());
 
 /* 初始化状态 */
 setConnected(false);
-log('sys', '等待连接 CAR-DEBUGER');
+log('sys', '等待连接设备');
 if (!navigator.bluetooth) {
-  log('err', '当前环境不支持 Web Bluetooth（需 Chrome/Edge 且为 https 或 localhost）');
+  log('err', '当前环境不支持蓝牙连接，请用 Chrome / Edge');
 }
 
 /* PWA：仅在 https / localhost 下注册，file:// 与原生 App 壳内自动跳过 */
 if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0 && !window.__APP_SHELL__) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch(err => {
-      log('sys', 'PWA 离线缓存未启用：' + err.message);
+      log('sys', '离线缓存未启用');
     });
   });
 }
