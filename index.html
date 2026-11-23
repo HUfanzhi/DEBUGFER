@@ -73,6 +73,8 @@
   @keyframes breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
   .brand h1{font-size:17px;margin:0;font-weight:650;letter-spacing:.2px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .brand h1 .ver{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--acc);
+    margin-left:6px;vertical-align:2px;opacity:.9}
   .brand .sub{font-family:var(--mono);font-size:11px;color:var(--dim-2);margin-top:2px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
 
@@ -240,7 +242,7 @@
         </svg>
       </div>
       <div>
-        <h1>远程调试器</h1>
+        <h1>远程调试器<span class="ver">v1.3</span></h1>
         <div class="sub" id="fwline">未连接</div>
       </div>
     </div>
@@ -255,10 +257,10 @@
   <section>
     <div class="sec-head">
       <h2>可调变量</h2>
-      <span class="hint" id="varHint">等待主控上报</span>
+      <span class="hint" id="varHint">等待主控变量表</span>
     </div>
     <div class="grid" id="vars"></div>
-    <div class="empty" id="varsEmpty">连接后由主控上电时自动上报变量表</div>
+    <div class="empty" id="varsEmpty">连接后由主控上电时自动发送变量表</div>
     <div style="display:flex;gap:10px;margin-top:10px">
       <button class="btn ghost" id="btnRescan" style="flex:1">重新读取主控变量</button>
     </div>
@@ -305,7 +307,7 @@
       <p><b>1. 浏览器</b>：需要 Chrome / Edge（桌面版或安卓版）。iPhone 的 Safari 不支持 Web Bluetooth。</p>
       <p><b>2. 电脑蓝牙</b>：Windows 需开启蓝牙并安装好适配器驱动；连接前不要先配对（由网页直接连接）。</p>
       <p><b>3. 变量不出现</b>：确认主控已通过串口发来变量声明；点“重新读取主控变量”会向主控请求重发。</p>
-      <p><b>4. 值被拉回</b>：变量以主控为准，主控若周期性上报，会覆盖手机刚改的值——这是正常的同步行为。</p>
+      <p><b>4. 值以主控为准</b>：手机改值会立即下发到主控；主控不会周期性上报覆盖。实时运行数据请用无线串口查看。</p>
     </div>
   </details>
 </div>
@@ -543,7 +545,7 @@ function handleMsg(m) {
       el.vars.innerHTML = '';
       el.varsEmpty.style.display = (m.n === 0) ? 'block' : 'none';
       if (m.n === 0) {
-        el.varsEmpty.textContent = '主控尚未上报变量，请点下方“重新读取主控变量”';
+        el.varsEmpty.textContent = '主控尚未发送变量表，请点下方“重新读取主控变量”';
       }
       break;
 

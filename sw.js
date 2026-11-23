@@ -1,6 +1,6 @@
 /* ESP32 远程调试器 PWA Service Worker
  * 只缓存页面外壳与图标；页面导航走网络优先，保证固件/网页更新后立刻生效。 */
-const CACHE = 'car-debuger-v2';
+const CACHE = 'car-debuger-v4';
 const ASSETS = [
   './',
   './index.html',
