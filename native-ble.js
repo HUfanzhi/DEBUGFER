@@ -36,11 +36,20 @@
   }
 
   function dispatchNotify(bytes) {
-    if (!notifyTarget) { bufferedNotify.push(bytes); return; }
+    if (!notifyTarget || notifyTarget.size === 0) { bufferedNotify.push(bytes); return; }
     var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     notifyTarget.forEach(function (fn) {
       try { fn({ target: { value: dv } }); } catch (e) {}
     });
+  }
+
+  /* 连接后主控变量表会立刻推上来，可能早于页面注册 onNotify。
+   * 等到页面真正挂上监听再按原顺序补发，避免首批消息被丢掉。 */
+  function flushBufferedNotify() {
+    if (!notifyTarget || notifyTarget.size === 0 || bufferedNotify.length === 0) return;
+    var pending = bufferedNotify;
+    bufferedNotify = [];
+    pending.forEach(dispatchNotify);
   }
 
   /* 原生层回调入口，事件为 JSON 字符串 */
@@ -141,12 +150,15 @@
       uuid: uuid,
       startNotifications: function () {
         notifyTarget = handlers;
-        var pending = bufferedNotify; bufferedNotify = [];
-        pending.forEach(dispatchNotify);
+        flushBufferedNotify();
         return Promise.resolve(this);
       },
       addEventListener: function (type, fn) {
-        if (type === 'characteristicvaluechanged') handlers.add(fn);
+        if (type === 'characteristicvaluechanged') {
+          handlers.add(fn);
+          /* 页面刚挂上监听，把连接后收到的首批通知补发出去 */
+          flushBufferedNotify();
+        }
       },
       removeEventListener: function (type, fn) {
         handlers.delete(fn);

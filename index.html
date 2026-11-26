@@ -242,7 +242,7 @@
         </svg>
       </div>
       <div>
-        <h1>远程调试器<span class="ver">v1.3</span></h1>
+        <h1>远程调试器<span class="ver">v1.5</span></h1>
         <div class="sub" id="fwline">未连接</div>
       </div>
     </div>
@@ -336,7 +336,6 @@ let connected = false;
 let vars = new Map();          // id -> meta
 let controls = new Map();      // id -> {card, range, num, select, valEl, badge}
 let pending = new Map();       // id -> timeout
-let lastLocal = new Map();     // id -> ts
 let logCount = 0;
 let devTapCount = 0, devTapTimer = null, devUnlocked = false;
 let dlMode = false, dlHolding = false, dlHoldStart = 0, dlHoldRAF = 0;
@@ -616,9 +615,6 @@ function handleMsg(m) {
       toast(m.m);
       break;
 
-    case 'pong':
-      break;
-
     default:
       log('sys', '收到一条未识别的消息，已忽略');
   }
@@ -762,7 +758,6 @@ function renderVar(m) {
 }
 
 function scheduleSet(id, v, immediate) {
-  lastLocal.set(id, Date.now());
   if (immediate) {
     clearTimeout(pending.get(id));
     pending.delete(id);
@@ -777,18 +772,17 @@ function scheduleSet(id, v, immediate) {
 }
 
 function sendSet(id, v) {
-  lastLocal.set(id, Date.now());
-  send({ t: 'set', id: id, v: v });
+  send({ t: 'set', id: id, v: v }).then(ok => {
+    if (ok) return;
+    /* 连接后的第一次写入偶尔会被系统蓝牙栈拒绝，隔 300ms 再补一次 */
+    setTimeout(() => { send({ t: 'set', id: id, v: v }); }, 300);
+  });
 }
 
 function applyValue(id, v, src, force) {
   const c = controls.get(id);
   if (!c) return;
   const meta = c.meta;
-
-  if (!force && src !== 'm' && Date.now() - (lastLocal.get(id) || 0) < 600) {
-    // 刚由本地设置，避免回显抖动
-  }
 
   const txt = fmtVal(meta, v);
   if (c.valEl.textContent !== txt) {
@@ -798,14 +792,7 @@ function applyValue(id, v, src, force) {
     c.valEl.classList.add('flash');
   }
 
-  if (!force && document.activeElement === c.range) return;
-  if (!force && document.activeElement === c.num) return;
-
-  if (c.range) { c.range.value = v; fillRange(c.range, v); }
-  if (c.num) c.num.value = v;
-  if (c.select) c.select.value = v;
-  if (c.check) c.check.checked = !!v;
-
+  /* 徽标和闪动不受输入框焦点影响：主控回显时能立刻看到“主控” */
   c.badge.textContent = src === 'm' ? '主控' : (meta.ro ? '只读' : '已下发');
   c.badge.classList.toggle('master', src === 'm');
   c.card.classList.add('changed');
@@ -815,6 +802,14 @@ function applyValue(id, v, src, force) {
     c.badge.textContent = meta.ro ? '只读' : '可调';
     c.badge.classList.remove('master');
   }, 900);
+
+  if (!force && document.activeElement === c.range) return;
+  if (!force && document.activeElement === c.num) return;
+
+  if (c.range) { c.range.value = v; fillRange(c.range, v); }
+  if (c.num) c.num.value = v;
+  if (c.select) c.select.value = v;
+  if (c.check) c.check.checked = !!v;
 }
 
 /* ---------------- 调参与开发者配置 ---------------- */
